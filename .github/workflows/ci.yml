@@ -1,0 +1,106 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  lint-test-train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint (flake8)
+        run: flake8 src tests scripts
+
+      - name: Unit tests
+        run: |
+          mkdir -p reports
+          pytest --junitxml=reports/junit.xml --cov=src --cov-report=xml:reports/coverage.xml --cov-report=term
+
+      - name: Prepare data (download, fall back to committed copy)
+        run: python scripts/download_data.py || echo "Download failed - using committed data/"
+
+      - name: Train models (MLflow tracking)
+        run: python -m src.train
+
+      - name: Run EDA
+        run: python -m src.eda
+
+      - name: Upload training artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-artifacts
+          path: |
+            models/
+            mlflow.db
+            mlartifacts/
+            reports/
+            logs/
+          if-no-files-found: warn
+
+  docker:
+    needs: lint-test-train
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download trained model from this run
+        uses: actions/download-artifact@v4
+        with:
+          name: training-artifacts
+          path: training-artifacts
+
+      - name: Use model produced by this run
+        run: |
+          cp "$(find training-artifacts -name model.joblib | head -1)" models/model.joblib
+          cp "$(find training-artifacts -name model_metadata.json | head -1)" models/model_metadata.json
+
+      - name: Build image
+        run: docker build -t heart-disease-api:ci .
+
+      - name: Smoke test container
+        run: |
+          docker run -d --name api -p 8000:8000 heart-disease-api:ci
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break || sleep 2; done
+          curl -sf -X POST http://localhost:8000/predict -H "Content-Type: application/json" \
+            -d '{"age":63,"sex":1,"cp":1,"trestbps":145,"chol":233,"fbs":1,"restecg":2,"thalach":150,"exang":0,"oldpeak":2.3,"slope":3,"ca":0,"thal":6}'
+          docker logs api | tail -20
+          docker rm -f api
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}
+          docker tag heart-disease-api:ci $IMAGE:latest
+          docker tag heart-disease-api:ci $IMAGE:${GITHUB_SHA::7}
+          docker push $IMAGE:latest
+          docker push $IMAGE:${GITHUB_SHA::7}
