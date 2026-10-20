@@ -77,3 +77,8 @@ data/  models/  reports/  screenshots/
 
 UCI Machine Learning Repository, Heart Disease (id 45) – Cleveland subset, 303 patients.
 Janosi, Steinbrunn, Pfisterer, Detrano. https://archive.ics.uci.edu/dataset/45/heart+disease
+
+## Project Demo
+
+[▶ Watch the MLOps Demo Video](https://drive.google.com/file/d/1ak8_VANVDlQSk8_059rmc-mVqymzenfH/view?usp=sharing)
+
