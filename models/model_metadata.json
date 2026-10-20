@@ -1,6 +1,6 @@
 {
   "model_name": "logistic_regression",
-  "trained_at": "2026-10-19T03:46:59.301144+00:00",
+  "trained_at": "2026-10-19T18:03:41.658754+00:00",
   "sklearn_version": "1.7.2",
   "features": [
     "age",
